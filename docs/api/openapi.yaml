@@ -1,0 +1,250 @@
+openapi: 3.0.3
+
+info:
+  title: AI Project API
+  description: API для работы с ИИ-сервисом
+  version: 1.0.0
+
+servers:
+  - url: https://example.com/api/v1
+paths:
+  /reviews:
+    post:
+      summary: Классифицировать тональность отзыва
+      description: >
+        Принимает текст отзыва о товаре, передаёт его ML-модели и возвращает
+        тональность (негативная, нейтральная или позитивная). Если модель
+        не смогла классифицировать отзыв, он сохраняется со статусом failed
+        и остаётся доступным для ручной проверки.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - product_id
+                - author_id
+                - text
+              properties:
+                product_id:
+                  type: integer
+                  example: 15
+                author_id:
+                  type: integer
+                  example: 7
+                text:
+                  type: string
+                  example: Отличный товар, пришёл быстро, всё работает
+      responses:
+        '200':
+          description: Отзыв обработан (тональность определена или классификация не удалась)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                    example: 1
+                  review_id:
+                    type: integer
+                    example: 342
+                  status:
+                    type: string
+                    enum: [classified, failed]
+                    example: classified
+                  tone:
+                    type: string
+                    nullable: true
+                    enum: [negative, neutral, positive]
+                    example: positive
+                  confidence:
+                    type: number
+                    nullable: true
+                    example: 0.93
+        '400':
+          description: Некорректный запрос (пустой текст или не хватает обязательных полей)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: INVALID_TEXT
+                message: Text must not be empty
+        '404':
+          description: Товар не найден
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: PRODUCT_NOT_FOUND
+                message: Product with id 15 not found
+        '503':
+          description: ML-модель временно недоступна
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: MODEL_UNAVAILABLE
+                message: Model is temporarily unavailable, try again later
+        '500':
+          description: Внутренняя ошибка сервиса
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: INTERNAL_ERROR
+                message: Internal server error
+
+  /analysis:
+    post:
+      summary: Запросить среднюю тональность отзывов о товаре
+      description: >
+        Считает среднюю тональность по всем классифицированным отзывам товара.
+        Отзывы со статусом failed в расчёте не участвуют. Параметр include_neutral
+        определяет, учитывать ли нейтральные отзывы (негативный = 0,
+        нейтральный = 1, позитивный = 2). Если подходящих отзывов нет,
+        возвращается статус insufficient_data.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - product_id
+                - include_neutral
+              properties:
+                product_id:
+                  type: integer
+                  example: 15
+                include_neutral:
+                  type: boolean
+                  description: Учитывать ли нейтральные отзывы при расчёте среднего
+                  example: false
+      responses:
+        '200':
+          description: Расчёт выполнен (результат или сообщение о недостатке данных)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisResult'
+              examples:
+                success:
+                  summary: Среднее рассчитано
+                  value:
+                    id: 101
+                    status: ok
+                    average: 1.4
+                    negative_count: 3
+                    neutral_count: 5
+                    positive_count: 12
+                insufficient_data:
+                  summary: Подходящих отзывов нет
+                  value:
+                    id: 102
+                    status: insufficient_data
+                    average: null
+                    negative_count: 0
+                    neutral_count: 4
+                    positive_count: 0
+        '400':
+          description: Некорректный запрос (не указан товар или способ расчёта)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: INVALID_REQUEST
+                message: Field include_neutral is required
+        '404':
+          description: Товар не найден
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: PRODUCT_NOT_FOUND
+                message: Product with id 15 not found
+
+  /analysis/{id}:
+    get:
+      summary: Получить результат аналитики по идентификатору
+      description: Возвращает ранее рассчитанный результат аналитики.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Идентификатор результата аналитики
+          schema:
+            type: integer
+          example: 101
+      responses:
+        '200':
+          description: Результат аналитики найден
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisResult'
+              example:
+                id: 101
+                status: ok
+                average: 1.4
+                negative_count: 3
+                neutral_count: 5
+                positive_count: 12
+        '404':
+          description: Результат аналитики не найден
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: ANALYSIS_NOT_FOUND
+                message: Analysis with id 101 not found
+
+components:
+  schemas:
+    Error:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          description: Машиночитаемый код ошибки
+          example: INVALID_TEXT
+        message:
+          type: string
+          description: Описание ошибки для разработчика
+          example: Text must not be empty
+    AnalysisResult:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 101
+        status:
+          type: string
+          enum: [ok, insufficient_data]
+          description: ok, если среднее рассчитано; insufficient_data, если в выборке нет отзывов
+          example: ok
+        average:
+          type: number
+          nullable: true
+          description: Средняя тональность от 0 до 2; null при insufficient_data
+          example: 1.4
+        negative_count:
+          type: integer
+          example: 3
+        neutral_count:
+          type: integer
+          example: 5
+        positive_count:
+          type: integer
+          example: 12
