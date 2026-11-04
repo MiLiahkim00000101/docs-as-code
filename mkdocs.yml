@@ -22,3 +22,7 @@ nav:
       - Диаграммы: project/diagrams.md
   - API:
       - Описание: api/index.md
+  - ML:
+      - Model Card: ml/model-card.md
+      - Data Sheet: ml/dataset.md
+      - Риски: ml/risks.md
