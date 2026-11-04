@@ -7,15 +7,21 @@ info:
 
 servers:
   - url: https://example.com/api/v1
+
+
 paths:
   /reviews:
     post:
       summary: Классифицировать тональность отзыва
       description: >
         Принимает текст отзыва о товаре, передаёт его ML-модели и возвращает
-        тональность (негативная, нейтральная или позитивная). Если модель
-        не смогла классифицировать отзыв, он сохраняется со статусом failed
-        и остаётся доступным для ручной проверки.
+        тональность (негативная, нейтральная или позитивная).
+        Если модель ответила, но не смогла определить тональность
+        (например, текст нечитаем или уверенность модели ниже порога),
+        возвращается код 200 со статусом failed: отзыв сохраняется и остаётся
+        доступным для ручной проверки.
+        Если модель не ответила (недоступна или превышено время ожидания),
+        возвращается код 503: отзыв не сохраняется, запрос нужно повторить позже.
       requestBody:
         required: true
         content:
@@ -38,7 +44,9 @@ paths:
                   example: Отличный товар, пришёл быстро, всё работает
       responses:
         '200':
-          description: Отзыв обработан (тональность определена или классификация не удалась)
+          description: >
+            Модель ответила. Тональность определена (classified)
+            или модель не смогла её определить (failed).
           content:
             application/json:
               schema:
@@ -63,6 +71,23 @@ paths:
                     type: number
                     nullable: true
                     example: 0.93
+              examples:
+                classified:
+                  summary: Тональность определена
+                  value:
+                    id: 1
+                    review_id: 342
+                    status: classified
+                    tone: positive
+                    confidence: 0.93
+                failed:
+                  summary: Модель не смогла определить тональность
+                  value:
+                    id: 2
+                    review_id: 343
+                    status: failed
+                    tone: null
+                    confidence: null
         '400':
           description: Некорректный запрос (пустой текст или не хватает обязательных полей)
           content:
@@ -82,7 +107,9 @@ paths:
                 code: PRODUCT_NOT_FOUND
                 message: Product with id 15 not found
         '503':
-          description: ML-модель временно недоступна
+          description: >
+            Модель не ответила (недоступна или истекло время ожидания).
+            Отзыв не сохранён, запрос можно повторить позже.
           content:
             application/json:
               schema:
@@ -139,7 +166,8 @@ paths:
                   value:
                     id: 101
                     status: ok
-                    average: 1.4
+                    include_neutral: false
+                    average: 1.6
                     negative_count: 3
                     neutral_count: 5
                     positive_count: 12
@@ -148,6 +176,7 @@ paths:
                   value:
                     id: 102
                     status: insufficient_data
+                    include_neutral: false
                     average: null
                     negative_count: 0
                     neutral_count: 4
@@ -174,7 +203,7 @@ paths:
   /analysis/{id}:
     get:
       summary: Получить результат аналитики по идентификатору
-      description: Возвращает ранее рассчитанный результат аналитики.
+      description: Возвращает ранее рассчитанный результат аналитики, включая способ расчёта.
       parameters:
         - name: id
           in: path
@@ -193,7 +222,8 @@ paths:
               example:
                 id: 101
                 status: ok
-                average: 1.4
+                include_neutral: false
+                average: 1.6
                 negative_count: 3
                 neutral_count: 5
                 positive_count: 12
@@ -225,6 +255,14 @@ components:
           example: Text must not be empty
     AnalysisResult:
       type: object
+      required:
+        - id
+        - status
+        - include_neutral
+        - average
+        - negative_count
+        - neutral_count
+        - positive_count
       properties:
         id:
           type: integer
@@ -234,16 +272,25 @@ components:
           enum: [ok, insufficient_data]
           description: ok, если среднее рассчитано; insufficient_data, если в выборке нет отзывов
           example: ok
+        include_neutral:
+          type: boolean
+          description: >
+            Способ расчёта. true: нейтральные отзывы учтены (негативный = 0,
+            нейтральный = 1, позитивный = 2). false: нейтральные исключены.
+          example: false
         average:
           type: number
           nullable: true
           description: Средняя тональность от 0 до 2; null при insufficient_data
-          example: 1.4
+          example: 1.6
         negative_count:
           type: integer
           example: 3
         neutral_count:
           type: integer
+          description: >
+            Количество нейтральных отзывов среди классифицированных
+            (в среднем учитываются только при include_neutral = true)
           example: 5
         positive_count:
           type: integer
